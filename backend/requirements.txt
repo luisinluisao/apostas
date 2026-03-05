@@ -1,0 +1,12 @@
+fastapi
+uvicorn
+httpx
+python-dotenv
+pydantic
+passlib[argon2]
+python-jose[cryptography]
+uvloop
+watchfiles
+beautifulsoup4
+lxml
+aiohttp
