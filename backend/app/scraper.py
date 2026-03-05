@@ -464,12 +464,13 @@ async def fetch_pinnacle_league(client, league_id, league_name, sport_key, today
     return games
 
 
-async def fetch_all_pinnacle(client: httpx.AsyncClient, today: str, tomorrow: str):
+async def fetch_all_pinnacle(client: httpx.AsyncClient, today: str, tomorrow: str, progress_callback=None):
     """Busca dinamicamente TODAS as ligas e jogos da Pinnacle para os esportes suportados."""
     all_found = []
     seen_ids = set()
 
     try:
+        if progress_callback: await progress_callback(12, "Consultando esportes Pinnacle...")
         # 1. Buscar todos os esportes para validar quais estão ativos
         r_sports = await client.get(f"{PIN_BASE}/sports", headers=H_PIN, timeout=10)
         if r_sports.status_code != 200:
@@ -479,10 +480,16 @@ async def fetch_all_pinnacle(client: httpx.AsyncClient, today: str, tomorrow: st
         active_sports = [s for s in sports_data if s.get("id") in PIN_SPORT_MAP]
         
         # 2. Para cada esporte, buscar as ligas
-        for sport in active_sports:
+        total_sports = len(active_sports)
+        for idx, sport in enumerate(active_sports):
             s_id = sport["id"]
             s_key = PIN_SPORT_MAP[s_id]
+            s_name = sport.get("name", s_key)
             
+            if progress_callback: 
+                prog = 15 + int((idx / total_sports) * 20)
+                await progress_callback(prog, f"Buscando ligas Pinnacle: {s_name}...")
+
             try:
                 r_leagues = await client.get(f"{PIN_BASE}/sports/{s_id}/leagues?hasOfferings=true", headers=H_PIN, timeout=10)
                 if r_leagues.status_code != 200:
@@ -491,16 +498,19 @@ async def fetch_all_pinnacle(client: httpx.AsyncClient, today: str, tomorrow: st
                 leagues = r_leagues.json()
                 
                 # 3. Buscar jogos de cada liga
-                # Criamos as tarefas para buscar em paralelo
                 tasks = []
                 for league in leagues:
-                    l_id = league["id"]
-                    l_name = league["name"]
-                    tasks.append(fetch_pinnacle_league(client, l_id, l_name, s_key, today, tomorrow))
+                    tasks.append(fetch_pinnacle_league(client, league["id"], league["name"], s_key, today, tomorrow))
                 
-                # Executar buscas da liga em grupos para evitar rate limit
-                for i in range(0, len(tasks), 15):
-                    batch = tasks[i : i + 15]
+                total_leagues = len(tasks)
+                batch_size = 5
+                for i in range(0, total_leagues, batch_size):
+                    if progress_callback:
+                        # Progresso entre 15% e 45%
+                        p = 15 + int((idx / total_sports) * 30) + int((i / total_leagues) * (30 / total_sports))
+                        await progress_callback(min(45, p), f"Pinnacle: {s_name} ({i}/{total_leagues})")
+                    
+                    batch = tasks[i : i + batch_size]
                     results = await asyncio.gather(*batch, return_exceptions=True)
                     for res in results:
                         if isinstance(res, list):
@@ -640,9 +650,8 @@ async def fetch_betexplorer_page(client, url: str, sport_key: str, today: str, t
     return games
 
 
-async def fetch_betexplorer_all(client, today: str, tomorrow: str):
+async def fetch_betexplorer_all(client, today: str, tomorrow: str, progress_callback=None):
     # Lista expandida de esportes suportados pela BetExplorer
-    # soccer, basketball, hockey, tennis, handball, volleyball
     sports = ["soccer", "basketball", "hockey", "tennis", "handball", "volleyball"]
     dynamic_pages = []
     
@@ -653,16 +662,28 @@ async def fetch_betexplorer_all(client, today: str, tomorrow: str):
             url = f"https://www.betexplorer.com/next/{sport}/?year={y}&month={m}&day={d}"
             dynamic_pages.append((url, f"{sport}_global"))
     
-    tasks = [fetch_betexplorer_page(client, url, sport_key, today, tomorrow) for url, sport_key in dynamic_pages]
-    results = await asyncio.gather(*tasks, return_exceptions=True)
     out = []
     seen = set()
-    for r in results:
-        if isinstance(r, list):
-            for g in r:
-                if g["id"] not in seen:
-                    seen.add(g["id"])
-                    out.append(g)
+    total_pages = len(dynamic_pages)
+    
+    # Processar em batches para progresso mais suave
+    batch_size = 2
+    for i in range(0, total_pages, batch_size):
+        if progress_callback:
+            prog = 50 + int((i / total_pages) * 35)
+            await progress_callback(min(85, prog), f"BetExplorer ({i}/{total_pages} págs)")
+            
+        batch = dynamic_pages[i : i + batch_size]
+        tasks = [fetch_betexplorer_page(client, url, sport_key, today, tomorrow) for url, sport_key in batch]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        for r in results:
+            if isinstance(r, list):
+                for g in r:
+                    if g["id"] not in seen:
+                        seen.add(g["id"])
+                        out.append(g)
+    
     return out
 
 

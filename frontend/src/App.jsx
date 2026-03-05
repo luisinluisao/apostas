@@ -54,7 +54,8 @@ function formatDate(d){
 function Badge({children,color=C.accent,small,pulse}){return(<span style={{background:color+"18",color,border:`1px solid ${color}35`,padding:small?"2px 8px":"4px 12px",borderRadius:99,fontSize:small?10:11,fontWeight:700,letterSpacing:"0.05em",whiteSpace:"nowrap",display:"inline-flex",alignItems:"center",gap:4,boxShadow:pulse?`0 0 8px ${color}40`:"none"}}>{pulse&&<span style={{width:5,height:5,borderRadius:"50%",background:color,display:"inline-block",animation:"pulseGlow 1.5s ease-in-out infinite"}}/>}{children}</span>);}
 function Card({children,style,hover,glow,onClick}){const[h,sh]=useState(false);return(<div onClick={onClick} onMouseEnter={()=>hover&&sh(true)} onMouseLeave={()=>hover&&sh(false)} style={{background:h?C.cardHov:C.card,border:`1px solid ${h?C.borderBright:C.border}`,borderRadius:16,boxShadow:glow?`0 0 30px ${C.accentGlow}`:"none",transition:"all 0.2s",position:"relative",overflow:"hidden",cursor:onClick?"pointer":undefined,...style}}>{children}</div>);}
 function StatCard({label,value,sub,accent=C.accent,icon}){return(<Card hover style={{padding:"20px 22px",flex:1,minWidth:140}}><div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}><div><div style={{color:C.muted,fontSize:10,fontWeight:700,letterSpacing:"0.12em",textTransform:"uppercase",marginBottom:10,fontFamily:BODY}}>{label}</div><div style={{color:accent,fontSize:28,fontWeight:800,lineHeight:1,fontFamily:NUM,letterSpacing:"-0.02em"}}>{value}</div>{sub&&<div style={{fontSize:11,marginTop:6,color:C.faint,fontFamily:BODY}}>{sub}</div>}</div>{icon&&<span style={{fontSize:24,opacity:0.5}}>{icon}</span>}</div><div style={{position:"absolute",bottom:0,left:0,right:0,height:2,background:`linear-gradient(90deg,transparent,${accent}50,transparent)`}}/></Card>);}
-function Spinner({label="Buscando jogos reais..."}){return(<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16,padding:"60px 0"}}><div style={{position:"relative",width:48,height:48}}><div style={{width:48,height:48,borderRadius:"50%",border:`2px solid ${C.border}`,borderTopColor:C.accent,animation:"spin 0.8s linear infinite"}}/><div style={{position:"absolute",inset:6,borderRadius:"50%",border:`2px solid ${C.border}`,borderBottomColor:C.purple,animation:"spin 1.2s linear infinite reverse"}}/></div><span style={{color:C.muted,fontSize:13,fontFamily:BODY,letterSpacing:"0.06em"}}>{label}</span></div>);}
+function ProgressBar({progress}){return(<div style={{width:"100%",maxWidth:300,height:8,background:C.border,borderRadius:4,overflow:"hidden",marginTop:12,position:"relative"}}><div style={{width:`${progress}%`,height:"100%",background:C.grad,transition:"width 0.4s ease"}}/><div style={{position:"absolute",inset:0,background:`linear-gradient(90deg,transparent,rgba(255,255,255,0.1),transparent)`,animation:"shimmer 1.5s infinite"}}/></div>);}
+function Spinner({label="Buscando jogos reais...", progress=0}){return(<div style={{display:"flex",flexDirection:"column",alignItems:"center",gap:16,padding:"60px 0"}}><div style={{position:"relative",width:48,height:48}}><div style={{width:48,height:48,borderRadius:"50%",border:`2px solid ${C.border}`,borderTopColor:C.accent,animation:"spin 0.8s linear infinite"}}/><div style={{position:"absolute",inset:6,borderRadius:"50%",border:`2px solid ${C.border}`,borderBottomColor:C.purple,animation:"spin 1.2s linear infinite reverse"}}/></div><span style={{color:C.muted,fontSize:13,fontFamily:BODY,letterSpacing:"0.06em",textAlign:"center"}}>{label}{progress > 0 && <div>{progress}%</div>}</span>{progress > 0 && <ProgressBar progress={progress}/>}</div>);}
 function OddPill({value}){return(<div style={{background:C.surface,borderRadius:8,padding:"5px 12px",color:C.accent,fontWeight:700,fontSize:15,fontFamily:NUM,letterSpacing:"0.02em",border:`1px solid ${C.border}`}}>{value}</div>);}
 function EV({ev}){const p=ev>0;return(<span style={{color:p?C.green:C.red,fontSize:11,fontWeight:700,fontFamily:NUM,display:"inline-flex",alignItems:"center",gap:2}}>{p?"▲":"▼"} {p?"+":""}{(ev*100).toFixed(1)}%</span>);}
 function FInput({label,type="text",value,onChange,placeholder,hint,right,disabled}){const[f,sf]=useState(false);return(<div style={{marginBottom:18}}>{label&&<label style={{color:f?C.accent:C.muted,fontSize:11,fontWeight:700,display:"block",marginBottom:7,letterSpacing:"0.1em",transition:"color 0.2s",fontFamily:BODY}}>{label}</label>}<div style={{position:"relative"}}><input type={type} value={value} onChange={onChange} placeholder={placeholder} disabled={disabled} onFocus={()=>sf(true)} onBlur={()=>sf(false)} style={{width:"100%",background:disabled?"#060d18":C.surface,border:`1px solid ${f?C.accent+"80":C.border}`,borderRadius:10,padding:`13px ${right?44:16}px 13px 16px`,color:disabled?C.muted:C.text,fontSize:14,outline:"none",boxSizing:"border-box",boxShadow:f?`0 0 0 3px ${C.accentGlow}`:"none",transition:"all 0.2s",fontFamily:BODY}}/>{right&&<div style={{position:"absolute",right:14,top:"50%",transform:"translateY(-50%)"}}>{right}</div>}</div>{hint&&<p style={{color:C.faint,fontSize:11,marginTop:5,fontFamily:BODY}}>{hint}</p>}</div>);}
@@ -353,13 +354,14 @@ function CalcTab(){
 }
 
 // ─── MY BETS ──────────────────────────────────────────────────────────────────
-function MyBetsTab(){
-  const[bets,setBets]=useState(()=>{try{return JSON.parse(localStorage.getItem("myBets")||"[]");}catch{return [];}});
+function MyBetsTab({user}){
+  const key = `${user.username}_myBets`;
+  const[bets,setBets]=useState(()=>{try{return JSON.parse(localStorage.getItem(key)||"[]");}catch{return [];}});
   const[adding,setAdding]=useState(false);
   const[form,setForm]=useState({event:"",pick:"",odds:"",stake:""});
-  const save=()=>{if(!form.event||!form.odds||!form.stake)return;const nb={...form,id:Date.now(),odds:+form.odds,stake:+form.stake,result:"pending",date:new Date().toLocaleDateString("pt-BR")};const u=[nb,...bets];setBets(u);localStorage.setItem("myBets",JSON.stringify(u));setForm({event:"",pick:"",odds:"",stake:""});setAdding(false);};
-  const upd=(id,r)=>{const u=bets.map(b=>b.id===id?{...b,result:r}:b);setBets(u);localStorage.setItem("myBets",JSON.stringify(u));};
-  const del=(id)=>{const u=bets.filter(b=>b.id!==id);setBets(u);localStorage.setItem("myBets",JSON.stringify(u));};
+  const save=()=>{if(!form.event||!form.odds||!form.stake)return;const nb={...form,id:Date.now(),odds:+form.odds,stake:+form.stake,result:"pending",date:new Date().toLocaleDateString("pt-BR")};const u=[nb,...bets];setBets(u);localStorage.setItem(key,JSON.stringify(u));setForm({event:"",pick:"",odds:"",stake:""});setAdding(false);};
+  const upd=(id,r)=>{const u=bets.map(b=>b.id===id?{...b,result:r}:b);setBets(u);localStorage.setItem(key,JSON.stringify(u));};
+  const del=(id)=>{const u=bets.filter(b=>b.id!==id);setBets(u);localStorage.setItem(key,JSON.stringify(u));};
   const won=bets.filter(b=>b.result==="won"),lost=bets.filter(b=>b.result==="lost");
   const real=won.reduce((s,b)=>s+b.stake*(b.odds-1),0)-lost.reduce((s,b)=>s+b.stake,0);
   const wr=bets.filter(b=>b.result!=="pending").length>0?(won.length/bets.filter(b=>b.result!=="pending").length*100).toFixed(1):"0";
@@ -416,13 +418,16 @@ function MultipleCard({m,stake,idx}){
 }
 
 // ─── ALAVANCAGEM PROFISSIONAL ────────────────────────────────────────────────
-function AlavancagemTab({games}){
-  const[bancaInicial,setBancaInicial]=useState(()=>{return parseFloat(localStorage.getItem("alav_banca_ini")||"1000")});
-  const[history,setHistory]=useState(()=>{return JSON.parse(localStorage.getItem("alav_history")||"[]")});
+function AlavancagemTab({games, user}){
+  const keyBanca = `${user.username}_alav_banca_ini`;
+  const keyHistory = `${user.username}_alav_history`;
+
+  const[bancaInicial,setBancaInicial]=useState(()=>{return parseFloat(localStorage.getItem(keyBanca)||"1000")});
+  const[history,setHistory]=useState(()=>{return JSON.parse(localStorage.getItem(keyHistory)||"[]")});
 
   // Salvar sempre que mudar
-  useEffect(()=>localStorage.setItem("alav_banca_ini", bancaInicial.toString()),[bancaInicial]);
-  useEffect(()=>localStorage.setItem("alav_history", JSON.stringify(history)),[history]);
+  useEffect(()=>localStorage.setItem(keyBanca, bancaInicial.toString()),[bancaInicial, keyBanca]);
+  useEffect(()=>localStorage.setItem(keyHistory, JSON.stringify(history)),[history, keyHistory]);
 
   // Recalcular banca atualizada a partir do histórico
   const historyWithBanca = useMemo(()=>{
@@ -648,13 +653,15 @@ function AlavancagemTab({games}){
 }
 
 // ─── GLOBAL STYLES ────────────────────────────────────────────────────────────
-function GlobalStyles(){return(<style>{`@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;800&family=DM+Sans:wght@400;500;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}@keyframes spin{to{transform:rotate(360deg);}}@keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}@keyframes pulseGlow{0%,100%{opacity:1;}50%{opacity:0.4;}}::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:#1e3048;border-radius:3px;}input[type=range]{accent-color:${C.accent};cursor:pointer;}select{background:${C.card};border:1px solid ${C.border};color:${C.text};border-radius:8px;padding:6px 12px;font-family:${BODY};font-size:12px;outline:none;cursor:pointer;}input[type=number]{-moz-appearance:textfield;}input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}input::placeholder{color:#1e3550;}`}</style>);}
+function GlobalStyles(){return(<style>{`@import url('https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;700;800&family=DM+Sans:wght@400;500;700&display=swap');*{box-sizing:border-box;margin:0;padding:0;}@keyframes spin{to{transform:rotate(360deg);}}@keyframes fadeUp{from{opacity:0;transform:translateY(12px);}to{opacity:1;transform:translateY(0);}}@keyframes pulseGlow{0%,100%{opacity:1;}50%{opacity:0.4;}}@keyframes shimmer{0%{transform:translateX(-100%);}100%{transform:translateX(100%);}}::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:#1e3048;border-radius:3px;}input[type=range]{accent-color:${C.accent};cursor:pointer;}select{background:${C.card};border:1px solid ${C.border};color:${C.text};border-radius:8px;padding:6px 12px;font-family:${BODY};font-size:12px;outline:none;cursor:pointer;}input[type=number]{-moz-appearance:textfield;}input[type=number]::-webkit-inner-spin-button{-webkit-appearance:none;}input::placeholder{color:#1e3550;}`}</style>);}
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App(){
   const[user,setUser]=useState(()=>{const t=localStorage.getItem("token"),u=localStorage.getItem("username"),r=localStorage.getItem("role");return t?{token:t,username:u,role:r||"user"}:null;});
   const[tab,setTab]=useState("dashboard");
   const[loading,setLoading]=useState(false);
+  const[loadMsg, setLoadMsg]=useState("Buscando jogos reais...");
+  const[loadProgress, setLoadProgress]=useState(0);
   const[error,setError]=useState("");
   const[games,setGames]=useState([]);
   const[multiples,setMultiples]=useState([]);
@@ -672,20 +679,49 @@ export default function App(){
 
   const fetchGames=useCallback(async()=>{
     if(!user)return;
-    setLoading(true);setError("");
-    try{
-      const r=await fetch(`${API}/games?min_prob=${minProb/100}`,{headers:{"Authorization":`Bearer ${user.token}`}});
-      const d=await r.json();
-      if(!r.ok){if(r.status===401){handleLogout();return;}throw new Error(d.detail||"Erro ao buscar jogos");}
+    setLoading(true);setError("");setLoadProgress(5);setLoadMsg("Conectando...");
+    console.log("SSE: Iniciando conexão...");
+    
+    const url = `${API}/games/stream?min_prob=${minProb/100}&token=${user.token}`;
+    const ev = new EventSource(url);
+
+    ev.onmessage = (e) => {
+      try {
+        const d = JSON.parse(e.data);
+        console.log("SSE Data:", d);
+        if(d.progress) setLoadProgress(d.progress);
+        if(d.message) setLoadMsg(d.message);
+        
+        if(d.progress === 100) {
+          const validGames = (d.games||[]).filter(g => !isGameExpired(g.date, g.hour));
+          setGames(validGames);
+          setLoading(false);
+          ev.close();
+        }
+      } catch(err) {
+        // Ignora keep-alive ou comentários
+      }
+    };
+
+    ev.onerror = (err) => {
+      console.error("SSE Error:", err);
+      ev.close();
       
-      // FILTRO GLOBAL BRT: Remove jogos que já começaram
-      const validGames = (d.games||[]).filter(g => !isGameExpired(g.date, g.hour));
-      
-      setGames(validGames);
-      setSources(d.sources||[]);
-      if(d.errors?.length)setError("Avisos: "+d.errors.join(" | "));
-    }catch(e){setError(e.message);}
-    finally{setLoading(false);}
+      // Fallback silencioso sem aviso de erro na tela
+      fetch(`${API}/games?min_prob=${minProb/100}`,{headers:{"Authorization":`Bearer ${user.token}`}})
+        .then(r=>r.json())
+        .then(d=>{
+           const validGames = (d.games||[]).filter(g => !isGameExpired(g.date, g.hour));
+           setGames(validGames);
+           setSources(d.sources||[]);
+           setLoading(false);
+        })
+        .catch(e=>{
+           console.error("Fallback Error:", e);
+           setError("Falha ao carregar jogos. Verifique sua conexão.");
+           setLoading(false);
+        });
+    };
   },[minProb,user]);
 
   const [sportMultiFilter, setSportMultiFilter] = useState("all");
@@ -820,7 +856,7 @@ export default function App(){
         {tab==="dashboard"&&(
           <div style={{animation:"fadeUp 0.3s ease"}}>
             <div style={{marginBottom:24}}><h1 style={{fontWeight:700,fontSize:28,color:C.text,letterSpacing:"-0.02em",marginBottom:5}}>Análise do Dia</h1><p style={{color:C.muted,fontSize:13}}>{new Date().toLocaleDateString("pt-BR",{weekday:"long",day:"numeric",month:"long",year:"numeric"})}</p></div>
-            {loading?<Spinner/>:(
+            {loading?<Spinner label={loadMsg} progress={loadProgress}/>:(
               <>
                 <div style={{display:"flex",gap:12,marginBottom:24,flexWrap:"wrap"}}>
                   <StatCard label="Jogos" value={games.length} accent={C.accent} sub="Hoje e Amanhã" icon="⚽"/>
@@ -873,7 +909,7 @@ export default function App(){
               </div>
             </div>
 
-            {loading?<Spinner/>:(
+            {loading?<Spinner label={loadMsg} progress={loadProgress}/>:(
               <>
                 {filtered.length===0 ? (
                   <Card style={{padding:60,textAlign:"center"}}>
@@ -917,13 +953,14 @@ export default function App(){
                 <div style={{display:"flex",alignItems:"center",gap:7}}><span style={{color:C.muted,fontSize:12}}>R$</span><input type="number" value={stake} onChange={e=>setStake(+e.target.value)} min={1} style={{background:C.card,border:`1px solid ${C.border}`,color:C.text,borderRadius:8,padding:"6px 10px",fontFamily:NUM,fontSize:14,width:80,outline:"none"}}/></div>
               </div>
             </div>
-            {loading?<Spinner/>:(<><div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}><StatCard label="Geradas" value={multiples.length} accent={C.accent} icon="🎰"/><StatCard label="Melhor Odd" value={multiples[0]?.total_odds?.toFixed(2)||"-"} accent={C.purple} icon="📊"/><StatCard label="Lucro Pot." value={multiples[0]?`R$ ${(multiples[0].total_odds*stake-stake).toFixed(2)}`:"-"} accent={C.gold} sub={`em R$ ${stake}`} icon="💰"/></div>{multiples.length===0&&<Card style={{padding:40,textAlign:"center"}}><p style={{color:C.muted,fontFamily:BODY}}>Jogos insuficientes para o esporte selecionado ({sportMultiFilter}). Selecione outro ou aguarde novos dados.</p></Card>}{multiples.map((m,i)=><MultipleCard key={m.id} m={m} stake={stake} idx={i}/>)}</>)}
+            {loading?<Spinner label={loadMsg} progress={loadProgress}/>:(<><div style={{display:"flex",gap:12,marginBottom:20,flexWrap:"wrap"}}>
+<StatCard label="Geradas" value={multiples.length} accent={C.accent} icon="🎰"/><StatCard label="Melhor Odd" value={multiples[0]?.total_odds?.toFixed(2)||"-"} accent={C.purple} icon="📊"/><StatCard label="Lucro Pot." value={multiples[0]?`R$ ${(multiples[0].total_odds*stake-stake).toFixed(2)}`:"-"} accent={C.gold} sub={`em R$ ${stake}`} icon="💰"/></div>{multiples.length===0&&<Card style={{padding:40,textAlign:"center"}}><p style={{color:C.muted,fontFamily:BODY}}>Jogos insuficientes para o esporte selecionado ({sportMultiFilter}). Selecione outro ou aguarde novos dados.</p></Card>}{multiples.map((m,i)=><MultipleCard key={m.id} m={m} stake={stake} idx={i}/>)}</>)}
           </div>
         )}
 
-        {tab==="alavancagem"&&<AlavancagemTab games={games} loading={loading}/>}
+        {tab==="alavancagem"&&<AlavancagemTab games={games} user={user}/>}
         {tab==="calculadora"&&<CalcTab/>}
-        {tab==="minhas"&&<MyBetsTab/>}
+        {tab==="minhas"&&<MyBetsTab user={user}/>}
 
       </div>
 

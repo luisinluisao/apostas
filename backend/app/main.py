@@ -1,7 +1,8 @@
 from fastapi import FastAPI, HTTPException, Query, Header, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from typing import Optional
-import os, json
+import os, json, asyncio, random
 from datetime import datetime, timezone, timedelta
 from pydantic import BaseModel
 from passlib.context import CryptContext
@@ -9,7 +10,7 @@ from jose import JWTError, jwt
 
 from .probability import remove_vig, calc_ev, model_probability
 from .generator import generate_multiples
-from .scraper import fetch_real_games
+from .scraper import fetch_real_games, fetch_all_pinnacle, fetch_betexplorer_all, deduplicate_games
 
 SECRET_KEY = os.getenv("SECRET_KEY", "multiplas_secret_2025")
 ALGORITHM  = "HS256"
@@ -49,11 +50,20 @@ def create_token(data):
     p = {**data, "exp": datetime.now(timezone.utc) + timedelta(days=7)}
     return jwt.encode(p, SECRET_KEY, algorithm=ALGORITHM)
 
-async def get_current_user(authorization: Optional[str] = Header(None)):
-    if not authorization: raise HTTPException(401, "Não autorizado")
+async def get_current_user(authorization: Optional[str] = Header(None), token: Optional[str] = Query(None)):
+    t = None
+    if authorization:
+        try:
+            t = authorization.split(" ")[1]
+        except:
+            pass
+    elif token:
+        t = token
+        
+    if not t: raise HTTPException(401, "Não autorizado")
+    
     try:
-        token = authorization.split(" ")[1]
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        payload = jwt.decode(t, SECRET_KEY, algorithms=[ALGORITHM])
         username = payload.get("sub")
         users = load_users()
         if username not in users: raise HTTPException(401, "Usuário não existe")
@@ -104,6 +114,89 @@ async def update_me(body: dict, user=Depends(get_current_user)):
 @app.get("/health")
 def health():
     return {"status": "ok", "version": "2.0.0", "timestamp": datetime.now(timezone.utc).isoformat()}
+
+from fastapi.responses import StreamingResponse
+
+@app.get("/api/games/stream")
+async def get_games_stream(min_prob: float = Query(0.50, ge=0.0, le=1.0), user=Depends(get_current_user)):
+    async def event_generator():
+        print(f"DEBUG: Iniciando stream para usuário {user['username']}")
+        yield ": keep-alive\n\n"
+        
+        brt = timezone(timedelta(hours=-3))
+        today = datetime.now(timezone.utc).astimezone(brt).strftime("%Y-%m-%d")
+        tomorrow = (datetime.now(timezone.utc).astimezone(brt) + timedelta(days=1)).strftime("%Y-%m-%d")
+        
+        all_games = []
+        event_queue = asyncio.Queue()
+        
+        async def progress_cb(p, m):
+            print(f"DEBUG PROGRESS: {p}% - {m}")
+            event_queue.put_nowait((p, m))
+
+        yield f"data: {json.dumps({'progress': 5, 'message': 'Conexão estabelecida...'})}\n\n"
+
+        async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
+            try:
+                # 1. PINNACLE
+                yield f"data: {json.dumps({'progress': 10, 'message': 'Iniciando Pinnacle...'})}\n\n"
+                
+                fetch_task = asyncio.create_task(fetch_all_pinnacle(client, today, tomorrow, progress_callback=progress_cb))
+                
+                while not fetch_task.done() or not event_queue.empty():
+                    try:
+                        while not event_queue.empty():
+                            p, m = event_queue.get_nowait()
+                            yield f"data: {json.dumps({'progress': p, 'message': m})}\n\n"
+                        
+                        if fetch_task.done(): break
+                        
+                        # Pequeno delay ou heartbeat se demorar muito
+                        await asyncio.sleep(0.1)
+                        if random.random() < 0.05: # Heartbeat aleatório a cada ~2 segundos
+                            yield ": heartbeat\n\n"
+                            
+                    except Exception: break
+                
+                all_games.extend(await fetch_task)
+
+                # 2. BETEXPLORER
+                yield f"data: {json.dumps({'progress': 45, 'message': 'Iniciando BetExplorer...'})}\n\n"
+                
+                fetch_task = asyncio.create_task(fetch_betexplorer_all(client, today, tomorrow, progress_callback=progress_cb))
+                
+                while not fetch_task.done() or not event_queue.empty():
+                    try:
+                        while not event_queue.empty():
+                            p, m = event_queue.get_nowait()
+                            yield f"data: {json.dumps({'progress': p, 'message': m})}\n\n"
+                        
+                        if fetch_task.done(): break
+                        await asyncio.sleep(0.1)
+                        if random.random() < 0.05:
+                            yield ": heartbeat\n\n"
+                    except Exception: break
+
+                all_games.extend(await fetch_task)
+
+            except Exception as e:
+                print(f"DEBUG ERROR STREAM: {str(e)}")
+                yield f"data: {json.dumps({'progress': 80, 'message': f'Aviso: {str(e)}'})}\n\n"
+
+        # 3. DEDUPLICAÇÃO E FINALIZAÇÃO
+        yield f"data: {json.dumps({'progress': 90, 'message': 'Deduplicando resultados...'})}\n\n"
+        final_games = deduplicate_games(all_games)
+        if min_prob > 0:
+            final_games = [g for g in final_games if any(m.get("model_prob", 0) >= min_prob for m in g.get("markets", []))]
+            
+        print(f"DEBUG: Stream finalizado com {len(final_games)} jogos")
+        yield f"data: {json.dumps({'progress': 100, 'message': 'Finalizado!', 'games': final_games, 'count': len(final_games)})}\n\n"
+
+    return StreamingResponse(event_generator(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "Connection": "keep-alive",
+        "X-Accel-Buffering": "no"
+    })
 
 @app.get("/api/games")
 async def get_games(min_prob: float = Query(0.50, ge=0.0, le=1.0), sport: Optional[str] = None, user=Depends(get_current_user)):
